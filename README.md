@@ -1,0 +1,70 @@
+# RugBuster Solana Preflight Skill
+
+A pre-transaction safety gate for Solana AI agents. Before any swap, buy,
+or signature involving an unfamiliar SPL token, this skill returns a hard
+**ALLOW / WARN / BLOCK** verdict backed by RugBuster's live risk-scoring
+engine — so an agent never signs blind.
+
+## The problem
+
+AI coding/trading agents increasingly construct and sign Solana
+transactions autonomously. None of the standard Solana AI Kit skills
+include a fraud/rug-detection gate — agents can build and submit a swap
+for a brand-new, unvetted token with zero risk checks. This skill closes
+that gap.
+
+## What it does
+
+- Calls the live RugBuster scoring API (multi-chain risk engine, currently
+  Solana/BNB/Avalanche)
+- Maps the response to a strict verdict: `ALLOW`, `WARN`, `BLOCK`, or
+  `UNAVAILABLE`
+- **Never returns a false ALLOW.** If the engine can't be reached, the
+  verdict is `UNAVAILABLE`, which the calling agent must treat as a block.
+- Surfaces RugCheck score, mint/freeze authority status, and CIA Engine
+  flags (funding origin, wallet clustering, deployer history) in plain
+  language
+
+## Install
+
+```bash
+git clone https://github.com/rugbusteraipatrol/rugbuster-solana-preflight-skill.git
+cd rugbuster-solana-preflight-skill
+bash install.sh /path/to/your-project
+```
+
+Or drop the `skill/` folder directly into an existing Solana AI Kit
+install under `.claude/skills/rugbuster-preflight/`.
+
+## Usage
+
+```
+/preflight-check <TOKEN_MINT_ADDRESS>
+```
+
+or directly:
+
+```bash
+python skill/scripts/preflight_scan.py <TOKEN_MINT_ADDRESS>
+```
+
+## Testing
+
+```bash
+pip install pytest
+python -m pytest tests/ -v
+```
+
+All tests run offline against mocked responses — no live API calls are
+made during CI.
+
+## API
+
+Backed by `https://rugbuster-api-production.up.railway.app`. See
+`skill/references/api.md` for the full contract. Override with the
+`RUGBUSTER_API_BASE` environment variable if self-hosting against a
+different RugBuster deployment.
+
+## License
+
+MIT
