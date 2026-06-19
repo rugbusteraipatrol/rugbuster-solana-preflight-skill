@@ -1,48 +1,58 @@
-# RugBuster API Reference
+# RugBuster Solana API
 
 ## Endpoint
 
-```
-GET https://rugbuster-api-production.up.railway.app/score?token=<MINT_ADDRESS>&chain=solana
+```http
+GET https://rugbuster-solana-api-production.up.railway.app/score?address=<MINT>
 ```
 
-(Base URL is read from `RUGBUSTER_API_BASE` env var if set, defaulting to
-the URL above. See `skill/scripts/preflight_scan.py`.)
+The service is Solana-only; do not send a `chain` parameter. Override the base
+URL with `RUGBUSTER_API_BASE` only when testing a compatible deployment.
 
-## Response shape (current /score endpoint)
+## Cache hit
 
 ```json
 {
-  "token": "string",
-  "network": "solana",
-  "rug_score": 0-100,
-  "rugcheck_score": 0-100,
-  "verdict_label": "string",
-  "flags": ["string", "..."]
+  "ok": true,
+  "address": "...",
+  "chain": "solana",
+  "risk_score": 5,
+  "label": "GOOD",
+  "rugcheck_score": 1,
+  "risk_flags": [],
+  "source": "postgres_cache",
+  "scanned_at": "2026-05-29T12:16:42.937869+00:00",
+  "token_name": "USD Coin",
+  "token_symbol": "USDC"
 }
 ```
 
-## Mapping to preflight verdict
+Verdict mapping:
 
-The /score endpoint does not itself return ALLOW/WARN/BLOCK — this skill
-maps it client-side:
+- `DANGER` or risk >= 70: `BLOCK`
+- `WARN` or risk 35-69: `WARN`
+- `GOOD` and risk < 35: `ALLOW`
 
-- `rug_score <= 15` and no critical flags -> `ALLOW`
-- `rug_score 16-49`, or non-critical flag present -> `WARN`
-- `rug_score >= 50`, or any critical flag -> `BLOCK`
-- Non-200 response, timeout, or unparseable JSON -> `UNAVAILABLE`
+## Cache miss
 
-Critical flags (any one forces BLOCK regardless of score):
-- both mint authority and freeze authority active with no LP lock evidence
-- known rug-pattern wallet clustering
-- deployer wallet flagged in prior rug events
+```json
+{
+  "ok": true,
+  "label": "UNKNOWN",
+  "risk_score": null,
+  "risk_flags": ["not_in_intelligence_db"],
+  "source": "cache_miss"
+}
+```
 
-This mapping lives in `preflight_scan.py` so it can be updated without
-changing the API contract. If RugBuster ships a native `/v1/preflight`
-endpoint that returns the verdict directly, update `PREFLIGHT_NATIVE_PATH`
-in the script and this skill will prefer it automatically.
+A cache miss always maps to `WARN`. It never maps to `ALLOW`.
 
-## Timeouts
+## Errors
 
-Default timeout: 8 seconds. On timeout, return `UNAVAILABLE` — do not retry
-silently more than once.
+- Invalid or EVM address: HTTP 400 with `invalid solana mint address`.
+- Other non-200 responses, timeouts, malformed JSON, and `ok: false` database
+  errors map to `UNAVAILABLE`.
+- Calling agents must treat `UNAVAILABLE` as `BLOCK`.
+
+The client timeout is eight seconds. Live scanning for unseen mints is planned
+for Phase 2.

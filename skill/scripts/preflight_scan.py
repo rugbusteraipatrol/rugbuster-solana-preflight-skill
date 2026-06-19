@@ -1,36 +1,25 @@
 #!/usr/bin/env python3
-"""
-RugBuster Solana Preflight Scanner.
+"""RugBuster Solana preflight scanner.
 
-Usage:
-    python preflight_scan.py <TOKEN_MINT_ADDRESS>
+Usage: python preflight_scan.py <TOKEN_MINT_ADDRESS>
 
-Exits 0 on ALLOW, 1 on WARN, 2 on BLOCK, 3 on UNAVAILABLE.
-Always prints a JSON verdict to stdout.
-
-Security principle: this script NEVER returns ALLOW when the underlying
-engine is unreachable or returns malformed data. Unavailable == BLOCK.
+Exits 0 on ALLOW, 1 on WARN, 2 on BLOCK, and 3 on UNAVAILABLE.
+Always prints a JSON verdict to stdout. Engine failure is never ALLOW.
 """
 
 import json
 import os
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
+
 
 API_BASE = os.environ.get(
     "RUGBUSTER_API_BASE",
-    "https://rugbuster-api-production.up.railway.app",
-)
-PREFLIGHT_NATIVE_PATH = "/v1/preflight"  # used automatically if it ever responds
+    "https://rugbuster-solana-api-production.up.railway.app",
+).rstrip("/")
 SCORE_PATH = "/score"
 TIMEOUT_SECONDS = 8
-
-CRITICAL_FLAGS = {
-    "mint_and_freeze_active_no_lp",
-    "deployer_flagged_prior_rug",
-    "wallet_clustering_rug_pattern",
-}
 
 
 def _unavailable(reason: str) -> dict:
@@ -43,62 +32,73 @@ def _unavailable(reason: str) -> dict:
     }
 
 
-def _fetch_json(url: str):
+def _fetch_json(url: str) -> tuple[int | None, dict | None]:
     try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
-            if resp.status != 200:
-                return None
-            body = resp.read().decode("utf-8")
-            return json.loads(body)
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            body = response.read().decode("utf-8")
+            return response.status, json.loads(body)
+    except urllib.error.HTTPError as error:
+        try:
+            body = json.loads(error.read().decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            body = None
+        return error.code, body
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return None
-
-
-def _try_native_preflight(token: str):
-    url = f"{API_BASE}{PREFLIGHT_NATIVE_PATH}?token={token}&chain=solana"
-    data = _fetch_json(url)
-    if not data or "verdict" not in data:
-        return None
-    if data["verdict"] not in {"ALLOW", "WARN", "BLOCK"}:
-        return None
-    return data
+        return None, None
 
 
 def _map_score_to_verdict(data: dict) -> dict:
+    if data.get("ok") is not True:
+        return _unavailable(data.get("error") or "RugBuster API returned an invalid response")
+
+    label = str(data.get("label") or "").upper()
+    source = data.get("source")
+    flags = data.get("risk_flags")
+    if not isinstance(flags, list):
+        flags = []
+
+    if label == "UNKNOWN" or source == "cache_miss":
+        return {
+            "verdict": "WARN",
+            "risk_score": None,
+            "rugcheck_score": data.get("rugcheck_score"),
+            "flags": flags or ["not_in_intelligence_db"],
+            "reason": "token not yet in intelligence DB - unverified, proceed with caution",
+        }
+
     try:
-        rug_score = float(data.get("rug_score"))
-    except (TypeError, ValueError):
-        return _unavailable("malformed rug_score in /score response")
+        risk_score = float(data["risk_score"])
+    except (KeyError, TypeError, ValueError):
+        return _unavailable("malformed risk_score in /score response")
 
-    flags = data.get("flags") or []
-    has_critical = any(f in CRITICAL_FLAGS for f in flags)
-
-    if has_critical or rug_score >= 50:
+    if label == "DANGER" or risk_score >= 70:
         verdict = "BLOCK"
-    elif rug_score >= 16:
+    elif label == "WARN" or 35 <= risk_score < 70:
         verdict = "WARN"
-    else:
+    elif label == "GOOD" and risk_score < 35:
         verdict = "ALLOW"
+    else:
+        return _unavailable("unrecognized label in /score response")
 
     return {
         "verdict": verdict,
-        "risk_score": rug_score,
+        "risk_score": risk_score,
         "rugcheck_score": data.get("rugcheck_score"),
         "flags": flags,
-        "reason": data.get("verdict_label", "scored via /score endpoint"),
+        "reason": f"RugBuster label: {label}",
     }
 
 
-def run_preflight(token: str) -> dict:
-    native = _try_native_preflight(token)
-    if native is not None:
-        return native
+def run_preflight(mint: str) -> dict:
+    url = f"{API_BASE}{SCORE_PATH}?address={mint}"
+    status, data = _fetch_json(url)
 
-    url = f"{API_BASE}{SCORE_PATH}?token={token}&chain=solana"
-    data = _fetch_json(url)
-    if data is None:
-        return _unavailable("rugbuster API unreachable or returned non-200/invalid JSON")
+    if status == 400:
+        reason = data.get("error") if isinstance(data, dict) else None
+        return _unavailable(reason or "invalid solana mint address")
+    if status != 200 or not isinstance(data, dict):
+        return _unavailable("RugBuster API unreachable or returned non-200/invalid JSON")
 
     return _map_score_to_verdict(data)
 
@@ -108,14 +108,13 @@ def main() -> int:
         print(json.dumps(_unavailable("missing token mint address argument")))
         return 3
 
-    token = sys.argv[1].strip()
-    if not token:
+    mint = sys.argv[1].strip()
+    if not mint:
         print(json.dumps(_unavailable("empty token mint address")))
         return 3
 
-    result = run_preflight(token)
+    result = run_preflight(mint)
     print(json.dumps(result, indent=2))
-
     return {"ALLOW": 0, "WARN": 1, "BLOCK": 2, "UNAVAILABLE": 3}[result["verdict"]]
 
 

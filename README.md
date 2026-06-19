@@ -2,8 +2,9 @@
 
 A pre-transaction safety gate for Solana AI agents. Before any swap, buy,
 or signature involving an unfamiliar SPL token, this skill returns a hard
-**ALLOW / WARN / BLOCK** verdict backed by RugBuster's live risk-scoring
-engine — so an agent never signs blind.
+**ALLOW / WARN / BLOCK** verdict backed by RugBuster's Solana intelligence
+database of 20k+ scanned tokens and weighted scoring, so an agent never signs
+blind.
 
 ## The problem
 
@@ -15,12 +16,13 @@ that gap.
 
 ## What it does
 
-- Calls the live RugBuster scoring API (multi-chain risk engine, currently
-  Solana/BNB/Avalanche)
+- Calls the dedicated Solana API, served from its low-latency score cache
 - Maps the response to a strict verdict: `ALLOW`, `WARN`, `BLOCK`, or
   `UNAVAILABLE`
 - **Never returns a false ALLOW.** If the engine can't be reached, the
   verdict is `UNAVAILABLE`, which the calling agent must treat as a block.
+- Returns explicit `UNKNOWN`/`WARN` for cache misses; unseen tokens never pass
+  as safe. Live on-demand scanning for unseen mints is planned for Phase 2.
 - Surfaces RugCheck score, mint/freeze authority status, and CIA Engine
   flags (funding origin, wallet clustering, deployer history) in plain
   language
@@ -60,7 +62,7 @@ made during CI.
 
 ## API
 
-Backed by `https://rugbuster-api-production.up.railway.app`. See
+Backed by `https://rugbuster-solana-api-production.up.railway.app`. See
 `skill/references/api.md` for the full contract. Override with the
 `RUGBUSTER_API_BASE` environment variable if self-hosting against a
 different RugBuster deployment.
