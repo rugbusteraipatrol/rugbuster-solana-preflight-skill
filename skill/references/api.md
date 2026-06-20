@@ -6,53 +6,75 @@
 GET https://rugbuster-solana-api-production.up.railway.app/score?address=<MINT>
 ```
 
-The service is Solana-only; do not send a `chain` parameter. Override the base
-URL with `RUGBUSTER_API_BASE` only when testing a compatible deployment.
+The service is Solana-only. Do not send a `chain` parameter. Set
+`RUGBUSTER_API_BASE` only when testing a compatible deployment.
 
-## Cache hit
+## Response sources
+
+The API checks sources in this order:
+
+1. `postgres_cache`: collector-enriched `solana_scans` result.
+2. `live_cache`: a live RugCheck baseline cached for less than one hour.
+3. `live_rugcheck`: a new rate-limited RugCheck baseline.
+
+Collector results can contain richer historical and behavioral evidence than a
+single live report. Do not present the two sources as equivalent.
+
+## Verified collector response
+
+This response was verified for USDC on 2026-06-20:
 
 ```json
 {
-  "ok": true,
-  "address": "...",
+  "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   "chain": "solana",
-  "risk_score": 5,
   "label": "GOOD",
-  "rugcheck_score": 1,
+  "ok": true,
   "risk_flags": [],
-  "source": "postgres_cache",
+  "risk_score": 5,
+  "rugcheck_score": 1,
   "scanned_at": "2026-05-29T12:16:42.937869+00:00",
-  "token_name": "USD Coin",
-  "token_symbol": "USDC"
+  "source": "postgres_cache",
+  "token_name": "Unknown ()",
+  "token_symbol": null
 }
 ```
 
 Verdict mapping:
 
-- `DANGER` or risk >= 70: `BLOCK`
-- `WARN` or risk 35-69: `WARN`
-- `GOOD` and risk < 35: `ALLOW`
+- `DANGER` or risk >= 70: `BLOCK`.
+- `WARN` or risk 35-69: `WARN`.
+- `GOOD` and risk < 35: `ALLOW`.
 
-## Cache miss
+## Live-scan failure
+
+If the collector and live cache miss and RugCheck returns an error, timeout,
+rate limit, or malformed response, the API responds with HTTP 200 and a safe
+unknown result:
 
 ```json
 {
+  "address": "<MINT>",
+  "chain": "solana",
   "ok": true,
   "label": "UNKNOWN",
+  "note": "No verified score is available. Treat this token as unverified.",
   "risk_score": null,
   "risk_flags": ["not_in_intelligence_db"],
-  "source": "cache_miss"
+  "scanned_at": null,
+  "source": "live_scan_unavailable"
 }
 ```
 
-A cache miss always maps to `WARN`. It never maps to `ALLOW`.
+The preflight client maps this API-level `UNKNOWN` to `WARN`, never `ALLOW`.
+Shield therefore requires explicit `confirmed=True` before invoking an action.
 
-## Errors
+## Other errors
 
 - Invalid or EVM address: HTTP 400 with `invalid solana mint address`.
-- Other non-200 responses, timeouts, malformed JSON, and `ok: false` database
-  errors map to `UNAVAILABLE`.
-- Calling agents must treat `UNAVAILABLE` as `BLOCK`.
+- Other non-200 responses, an unreachable API, malformed JSON, and `ok: false`
+  responses map to `UNAVAILABLE`.
+- Shield always refuses `BLOCK` and `UNAVAILABLE`.
 
-The client timeout is eight seconds. Live scanning for unseen mints is planned
-for Phase 2.
+The preflight HTTP client timeout is eight seconds. The API's internal live
+RugCheck request timeout is six seconds.

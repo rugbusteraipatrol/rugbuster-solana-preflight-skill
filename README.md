@@ -1,56 +1,42 @@
 # RugBuster Solana Preflight Skill
 
-A pre-transaction safety gate for Solana AI agents. Before any swap, buy,
-or signature involving an unfamiliar SPL token, this skill returns a hard
-**ALLOW / WARN / BLOCK** verdict backed by RugBuster's Solana intelligence
-database of 20k+ scanned tokens and weighted scoring, so an agent never signs
-blind.
+A pre-transaction risk gate for Solana agents and integrations. It converts
+RugBuster API results into `ALLOW`, `WARN`, `BLOCK`, or `UNAVAILABLE` before a
+caller decides whether to swap, buy, transfer, or sign.
+
+The production intelligence database contained 21,382 collector records for
+21,382 distinct mint addresses when verified on 2026-06-20.
 
 ## The problem
 
-AI coding/trading agents increasingly construct and sign Solana
-transactions autonomously. None of the standard Solana AI Kit skills
-include a fraud/rug-detection gate — agents can build and submit a swap
-for a brand-new, unvetted token with zero risk checks. This skill closes
-that gap.
+An agent can construct a transaction for an unfamiliar mint without first
+checking token risk. This skill provides a reusable preflight check and an
+optional code-level enforcement wrapper for that integration boundary.
 
-## What it does
+## Preflight check
 
-- Calls the dedicated Solana API, served from its low-latency score cache
-- Maps the response to a strict verdict: `ALLOW`, `WARN`, `BLOCK`, or
-  `UNAVAILABLE`
-- **Never returns a false ALLOW.** If the engine can't be reached, the
-  verdict is `UNAVAILABLE`, which the calling agent must treat as a block.
-- Returns explicit `UNKNOWN`/`WARN` for cache misses; unseen tokens never pass
-  as safe. Live on-demand scanning for unseen mints is planned for Phase 2.
-- Surfaces RugCheck score, mint/freeze authority status, and CIA Engine
-  flags (funding origin, wallet clustering, deployer history) in plain
-  language
+`preflight_scan.py` calls the production Solana API and maps its response:
 
-## Install
+- `GOOD` with risk below 35 becomes `ALLOW`.
+- `WARN` or risk from 35 through 69 becomes `WARN`.
+- `DANGER` or risk 70 and above becomes `BLOCK`.
+- An unreachable API, invalid response, or malformed score becomes
+  `UNAVAILABLE`.
 
-```bash
-git clone https://github.com/rugbusteraipatrol/rugbuster-solana-preflight-skill.git
-cd rugbuster-solana-preflight-skill
-bash install.sh /path/to/your-project
-```
-
-Or drop the `skill/` folder directly into an existing Solana AI Kit
-install under `.claude/skills/rugbuster-preflight/`.
-
-## Usage
-
-```
-/preflight-check <TOKEN_MINT_ADDRESS>
-```
-
-or directly:
+Run it directly:
 
 ```bash
 python skill/scripts/preflight_scan.py <TOKEN_MINT_ADDRESS>
 ```
 
-### Enforced Shield
+Collector-backed results may include accumulated creator history, launch
+sniping, funding, and wallet-clustering evidence. If a mint is absent from the
+collector table, the API uses a rate-limited live RugCheck baseline and caches
+it for one hour. That one-shot baseline is intentionally less rich. If the
+upstream live scan cannot produce a score, the API returns `UNKNOWN`, which the
+preflight client maps to `WARN`, never `ALLOW`.
+
+## Shield enforcement layer
 
 For code that executes swaps or signatures, use `run_protected` or the
 `guarded` decorator from `skill/scripts/shield.py`. See
@@ -62,6 +48,37 @@ It does not prevent an integration from bypassing the wrapper entirely by
 calling its own swap logic directly instead of adopting the pattern. No library
 can force adoption.
 
+Shield permits `ALLOW`, requires explicit `confirmed=True` for `WARN`, and
+always refuses `BLOCK`, `UNAVAILABLE`, or an unrecognized verdict.
+
+## Live demo
+
+The demo uses the real production API with a known collector-backed GOOD mint
+and a known collector-backed DANGER mint. It contains no trade implementation;
+the swap function only prints when Shield invokes it.
+
+```bash
+python demo/shield_demo.py
+```
+
+The GOOD example prints `EXECUTING SWAP`. The DANGER example prints only the
+blocked result, proving that the placeholder action was not called.
+
+## Install
+
+Run these commands in macOS/Linux Bash or Windows Git Bash:
+
+```bash
+git clone https://github.com/rugbusteraipatrol/rugbuster-solana-preflight-skill.git
+cd rugbuster-solana-preflight-skill
+bash install.sh /path/to/your-project
+```
+
+The command was verified from a clean clone on 2026-06-20. It installs the
+skill contents under `.claude/skills/rugbuster-preflight/`, plus the agent and
+command files. For manual installation, copy the **contents** of `skill/` into
+that destination rather than nesting the `skill` directory itself.
+
 ## Testing
 
 ```bash
@@ -69,16 +86,18 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
-All tests run offline against mocked responses — no live API calls are
-made during CI.
+The test suite is offline and mocks API responses. The separate live demo is
+the end-to-end production check.
 
-## API
+## API dependency
 
-Backed by `https://rugbuster-solana-api-production.up.railway.app`. See
-`skill/references/api.md` for the full contract. Override with the
-`RUGBUSTER_API_BASE` environment variable if self-hosting against a
-different RugBuster deployment.
+Production API: `https://rugbuster-solana-api-production.up.railway.app`
+
+Source: [rugbusteraipatrol/rugbuster-solana-api](https://github.com/rugbusteraipatrol/rugbuster-solana-api)
+
+See [`skill/references/api.md`](skill/references/api.md) for the response
+contract. Set `RUGBUSTER_API_BASE` only to use a compatible deployment.
 
 ## License
 
-MIT
+MIT. See [`LICENSE`](LICENSE).
