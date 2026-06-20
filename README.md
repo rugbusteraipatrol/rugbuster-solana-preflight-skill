@@ -13,6 +13,11 @@ An agent can construct a transaction for an unfamiliar mint without first
 checking token risk. This skill provides a reusable preflight check and an
 optional code-level enforcement wrapper for that integration boundary.
 
+![RugBuster Shield live demo](demo/shield_demo.gif)
+
+*RugBuster Shield blocking a real flagged DANGER token live — the swap
+function is never called.*
+
 ## Preflight check
 
 `preflight_scan.py` calls the production Solana API and maps its response:
