@@ -50,6 +50,18 @@ or directly:
 python skill/scripts/preflight_scan.py <TOKEN_MINT_ADDRESS>
 ```
 
+### Enforced Shield
+
+For code that executes swaps or signatures, use `run_protected` or the
+`guarded` decorator from `skill/scripts/shield.py`. See
+[`skill/SHIELD.md`](skill/SHIELD.md) for the integration pattern.
+
+Once an integration routes its swap/sign call through `rugbuster_shield`, that
+call cannot execute on a failing verdict: the action function is never invoked.
+It does not prevent an integration from bypassing the wrapper entirely by
+calling its own swap logic directly instead of adopting the pattern. No library
+can force adoption.
+
 ## Testing
 
 ```bash

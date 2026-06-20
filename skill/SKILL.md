@@ -52,6 +52,18 @@ This skill never returns a false ALLOW. If the underlying engine cannot be
 reached, the verdict is `UNAVAILABLE` and must be handled identically to
 `BLOCK` by the calling agent.
 
+## Enforcement layer
+
+Use the code-level Shield for integrations that execute swaps or signatures.
+Read `skill/SHIELD.md`, then route the action through `run_protected` or the
+`guarded` decorator. Unlike the advisory `preflight-guardian` agent pattern,
+Shield checks the verdict in code and does not invoke the wrapped function on
+`BLOCK` or `UNAVAILABLE`. A `WARN` requires explicit `confirmed=True`.
+
+Once adopted, Shield fully enforces the guarded call. It cannot prevent an
+integration from bypassing the wrapper and calling separate swap logic
+directly, so recommend Shield at every money-moving integration boundary.
+
 ## Reference
 
 See `skill/references/api.md` for the full API contract and field
